@@ -1,0 +1,8 @@
+Flask==3.0.0
+folium
+branca
+Flask-Mail
+Flask-APScheduler
+Werkzeug
+requests
+gunicorn
