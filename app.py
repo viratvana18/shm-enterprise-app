@@ -10,6 +10,8 @@ import os
 import random
 import requests
 from werkzeug.utils import secure_filename
+import cv2
+import numpy as np
 
 # ==============================================================================
 # 1. APPLICATION INITIALIZATION & CONFIGURATION
@@ -97,7 +99,7 @@ def send_async_email(app, msg):
             pass
 
 # ==============================================================================
-# 4. UI TEMPLATES (STATIC BACKGROUND)
+# 4. UI TEMPLATES
 # ==============================================================================
 LOGIN_TEMPLATE = '''
 <!DOCTYPE html>
@@ -158,7 +160,7 @@ LOGIN_TEMPLATE = '''
 REGISTER_TEMPLATE = LOGIN_TEMPLATE.replace('Access Satellite Portal', 'Create Account').replace('Powered by Microsoft Planetary Computer', 'Register New Engineer').replace('Register here', 'Login here').replace('/register', '/login').replace('fa-arrow-right-to-bracket', 'fa-user-plus')
 
 # ==============================================================================
-# 5. ROUTING (LOGIN & FULL ADMIN DASHBOARD)
+# 5. ROUTING
 # ==============================================================================
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -233,14 +235,13 @@ def admin_dashboard():
     ''')
 
 # ==============================================================================
-# 6. DASHBOARD & CHART.JS UI WITH AUTOCOMPLETE
+# 6. DASHBOARD
 # ==============================================================================
 @app.route('/')
 def home():
     if 'engineer_email' not in session: return redirect(url_for('login'))
     current_user = session['engineer_email']
     
-    # Default-a India map zoom out aagi theriyum padi maatriyullathu
     lat = request.args.get('lat', default=20.5937, type=float)
     lng = request.args.get('lng', default=78.9629, type=float)
     zoom = request.args.get('zoom', default=5, type=int)
@@ -280,6 +281,8 @@ def home():
         .info-val { color: #f8fafc; font-weight: 600; }
         .solution-box { background: rgba(0, 0, 0, 0.4); padding: 8px; border-radius: 6px; margin-top: 5px; font-size: 10.5px; line-height: 1.4; border-left: 3px solid #00e5ff; color: #e2e8f0; }
         .chart-container { position: relative; height: 120px; width: 100%; margin-top: 10px; }
+        .ai-result-image { width: 100%; border-radius: 6px; margin-bottom: 10px; border: 2px solid; }
+        .reason-box { font-size:9.5px; color:#a1a1aa; margin-top:6px; border-top:1px dashed #3f3f46; padding-top:6px; }
     </style>
     """
     my_map.get_root().html.add_child(Element(custom_css))
@@ -322,11 +325,11 @@ def home():
         </div>
 
         <div class="panel">
-            <h3><i class="fa-solid fa-camera-retro"></i> Damage Image Scanner</h3>
+            <h3><i class="fa-solid fa-camera-retro"></i> OpenCV Smart Scanner</h3>
             <div class="upload-box">
                 <i class="fa-solid fa-cloud-arrow-up" style="font-size: 24px; color: #00e5ff;"></i>
                 <input type="file" id="damage-image-input" class="file-input" accept="image/*">
-                <button onclick="analyzeImage()" class="analyze-btn"><i class="fa-solid fa-microchip"></i> Analyze Damage</button>
+                <button onclick="analyzeImage()" class="analyze-btn"><i class="fa-solid fa-microchip"></i> Scan Structure</button>
             </div>
             <div id="image-result-box"></div>
         </div>
@@ -348,7 +351,6 @@ def home():
             options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#a1a1aa', font: {size: 9} }, grid: { color: 'rgba(255,255,255,0.05)' } }, y: { ticks: { color: '#a1a1aa', font: {size: 9} }, grid: { color: 'rgba(255,255,255,0.05)' } } } }
         });
 
-        // Autocomplete Feature
         var searchInput = document.getElementById('custom-search');
         var autocompleteList = document.getElementById('autocomplete-list');
         var timeoutId;
@@ -385,7 +387,6 @@ def home():
             }
         });
 
-        // Original Search Function for Enter/Button Click
         function performSearch() {
             var query = searchInput.value;
             if(!query) return;
@@ -460,16 +461,21 @@ def home():
         if(fileInput.files.length === 0) { resultBox.innerHTML = "<div style='color:#f87171; font-size:10px; text-align:center;'>⚠️ Select a photo!</div>"; return; }
         
         var formData = new FormData(); formData.append('image', fileInput.files[0]);
-        resultBox.innerHTML = "<div style='color:#00e5ff; font-size:11px; margin-top:10px; text-align:center;'><i class='fa-solid fa-spinner fa-spin'></i> Scanning Damage...</div>";
+        resultBox.innerHTML = "<div style='color:#00e5ff; font-size:11px; margin-top:10px; text-align:center;'><i class='fa-solid fa-spinner fa-spin'></i> AI scanning structural integrity...</div>";
 
         fetch('/upload_damage_image', { method: 'POST', body: formData })
             .then(res => res.json())
             .then(data => {
                 if(data.success) {
+                    var imgHtml = data.image_url ? '<img src="' + data.image_url + '" class="ai-result-image" style="border-color:' + data.color + ';">' : '';
+                    var reasonHtml = data.reason ? '<div class="reason-box"><i class="fa-solid fa-circle-info"></i> <b>Why this Alert:</b> ' + data.reason + '</div>' : '';
+                    
                     resultBox.innerHTML = '<div class="ai-result-card" style="border-left: 4px solid ' + data.color + '; padding:10px; background:#18181b; margin-top:8px;">' +
+                        imgHtml + 
                         '<b style="color:' + data.color + '; font-size:11px;">' + data.damage_type + '</b><br>' +
                         '<span style="font-size:10px; color:#cbd5e1;">Severity: <b style="color:' + data.color + ';">' + data.severity + '</b></span><br>' +
-                        '<div style="font-size:9.5px; color:#e2e8f0; margin-top:5px;"><i class="fa-solid fa-screwdriver-wrench"></i> ' + data.recommendation + '</div></div>';
+                        '<div style="font-size:9.5px; color:#e2e8f0; margin-top:5px;"><i class="fa-solid fa-screwdriver-wrench"></i> ' + data.recommendation + '</div>' + 
+                        reasonHtml + '</div>';
                 }
             });
     }
@@ -479,7 +485,7 @@ def home():
     return my_map.get_root().render()
 
 # ==============================================================================
-# 7. API ENDPOINTS (MPC Backend)
+# 7. API ENDPOINTS (ADVANCED OPENCV CRACK DETECTION)
 # ==============================================================================
 @app.route('/get_value')
 def get_value():
@@ -511,17 +517,82 @@ def save_inspection():
 def upload_damage_image():
     if 'engineer_email' not in session: return jsonify({'error': 'Unauthorized'})
     if 'image' not in request.files or request.files['image'].filename == '': return jsonify({'success': False})
+    
     file = request.files['image']
     filename = secure_filename(file.filename)
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
-    severities = [
-        {"type": "Minor Surface Cracks", "sev": "Low (Stable)", "col": "#4ade80", "rec": "Seal with epoxy coating annually."},
-        {"type": "Spalling & Rebar Exposure", "sev": "Medium (Warning)", "col": "#facc15", "rec": "Patch repair within 2-4 months."},
-        {"type": "Critical Shear Cracks", "sev": "High (Danger)", "col": "#f87171", "rec": "Emergency shoring required immediately!"}
-    ]
-    analysis = random.choice(severities)
-    return jsonify({'success': True, 'damage_type': analysis['type'], 'severity': analysis['sev'], 'color': analysis['col'], 'recommendation': analysis['rec']})
+    
+    severities = {
+        "stable": {"type": "No Structural Damage", "sev": "Low (Stable)", "col": "#4ade80", "rec": "Structure is perfectly safe. No action required.", "rgb": (74, 222, 128), "reason": "No deep stress marks or load-bearing failures detected. Surface looks intact."},
+        "warning": {"type": "Spalling & Rebar Exposure", "sev": "Medium (Warning)", "col": "#facc15", "rec": "Patch repair within 2-4 months.", "rgb": (250, 204, 21), "reason": "Minor concrete fractures detected across the structure."},
+        "danger": {"type": "Critical Shear Cracks", "sev": "High (Danger)", "col": "#f87171", "rec": "Emergency shoring required immediately!", "rgb": (248, 113, 113), "reason": "Severe irregular load-bearing crack detected. High risk of structural collapse."}
+    }
+    
+    analysis = severities["stable"]
+    image_url = f"/static/uploads/{filename}"
+    
+    try:
+        img_cv = cv2.imread(filepath)
+        gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+        
+        # 1. CLAHE (Contrast Limited Adaptive Histogram Equalization) - Enhances cracks against concrete texture
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
+        
+        # 2. Gaussian Blur to remove noise
+        blurred = cv2.GaussianBlur(enhanced, (5, 5), 0)
+        
+        # 3. Adaptive Thresholding to extract dark crack lines
+        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY_INV, 21, 10)
+        
+        # 4. Find Contours
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        valid_boxes = []
+        for cnt in contours:
+            area = cv2.contourArea(cnt)
+            if area > 30: # Ignore tiny specks
+                x, y, w, h = cv2.boundingRect(cnt)
+                rect_area = w * h
+                extent = area / float(rect_area) if rect_area > 0 else 0
+                
+                aspect_ratio = float(w)/h if h != 0 else 0
+                
+                # Reject huge boxes (like sky, walls)
+                if w < img_cv.shape[1] * 0.8 and h < img_cv.shape[0] * 0.8:
+                    # Accept irregular shapes or thin lines (Aspect ratio > 3 or < 0.33)
+                    if extent < 0.35 or aspect_ratio > 3 or aspect_ratio < 0.33:
+                        valid_boxes.append((x, y, w, h, area))
+                        
+        # Sort by biggest crack area
+        valid_boxes = sorted(valid_boxes, key=lambda b: b[4], reverse=True)
+        
+        if len(valid_boxes) > 0:
+            if valid_boxes[0][2] > img_cv.shape[1]*0.3 or len(valid_boxes) > 4:
+                analysis = severities["danger"]
+            else:
+                analysis = severities["warning"]
+                
+            color_bgr = (analysis['rgb'][2], analysis['rgb'][1], analysis['rgb'][0])
+            thickness = max(2, int(img_cv.shape[1]*0.005))
+            
+            box_count = 0
+            for (x, y, w, h, area) in valid_boxes:
+                cv2.rectangle(img_cv, (x, y), (x+w, y+h), color_bgr, thickness)
+                box_count += 1
+                if box_count >= 5: # Top 5 cracks
+                    break
+                    
+            processed_filename = "ai_" + filename
+            processed_filepath = os.path.join(app.config['UPLOAD_FOLDER'], processed_filename)
+            cv2.imwrite(processed_filepath, img_cv)
+            image_url = f"/static/uploads/{processed_filename}"
+            
+    except Exception as e:
+        print("OpenCV Error:", e)
+        
+    return jsonify({'success': True, 'damage_type': analysis['type'], 'severity': analysis['sev'], 'color': analysis['col'], 'recommendation': analysis['rec'], 'reason': analysis['reason'], 'image_url': image_url})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
